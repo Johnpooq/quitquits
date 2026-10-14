@@ -1,0 +1,12 @@
+{
+  "id": "04-vague-time",
+  "scenario": "时间说不清：只补问一句",
+  "user_input": "上周主管说要给我调岗，还让我先把手上的工作交接出去",
+  "path": "A",
+  "suggestions": [
+    "clarify"
+  ],
+  "material_types": [],
+  "ideal_reply": "这件事大概发生在哪一天？说个大概就行，我按你说的记。",
+  "notes": "只问时间这一句，人物与内容都用原话，不追问其他细节。"
+}

@@ -55,7 +55,7 @@ export default function AppLayout() {
           })}
         </nav>
         <p className="faint mt-auto px-4 py-4 leading-relaxed">
-          本地演示 · 数据只保存在当前浏览器
+          演示版本 · 匿名设备，无需账号
         </p>
       </aside>
 

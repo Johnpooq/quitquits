@@ -1,0 +1,20 @@
+{
+  "id": "05-append-update",
+  "scenario": "已确认事件的新情况：建议「追加进展」",
+  "user_input": "今天主管又把我从另一个项目群里移出去了",
+  "context": {
+    "confirmed_events": [
+      {
+        "id": "e1",
+        "title": "项目群成员变化"
+      }
+    ]
+  },
+  "path": "A",
+  "suggestions": [
+    "append_update"
+  ],
+  "material_types": [],
+  "ideal_reply": "又被移出一个项目群，心里肯定不好受。这件事和你已经记录的「项目群成员变化」看起来是同一件，要不要把今天的情况作为进展追加进去？我不会自动改写已确认的内容。",
+  "notes": "不新建重复事件，也不自动改写已确认事件，由用户决定是否追加。"
+}

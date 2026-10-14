@@ -288,7 +288,7 @@ test.describe("情绪日历", () => {
 
   test("真实空状态与演示数据可以区分", async ({ page }) => {
     await page.goto("/profile");
-    await page.getByRole("button", { name: "清空本地数据" }).click();
+    await page.getByRole("button", { name: "清空我的数据" }).click();
     await page
       .getByRole("dialog")
       .getByRole("button", { name: "我确认清空" })

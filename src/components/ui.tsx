@@ -11,6 +11,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronDown, Companion, Loader2, X } from "./doodles";
 import { useAppStore } from "../store/useAppStore";
+import { aiLabel } from "../services/ai";
 
 type ToastItem = { id: number; message: string };
 type ToastFn = (message: string) => void;
@@ -338,7 +339,8 @@ export const ErrorState = ({
   </div>
 );
 
-export const MockBadge = ({ label = "模拟 AI" }: { label?: string }) => (
+/** 默认标识随服务端模式变化：接了真实模型显示「AI」，否则显示「模拟 AI」 */
+export const MockBadge = ({ label = aiLabel() }: { label?: string }) => (
   <Badge tone="neutral">{label}</Badge>
 );
 

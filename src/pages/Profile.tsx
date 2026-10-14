@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAppStore, STORAGE_KEY } from "../store/useAppStore";
+import { useAppStore } from "../store/useAppStore";
 import {
   Button,
   ConfirmDialog,
@@ -55,7 +55,7 @@ export default function ProfilePage() {
   return (
     <RequireProfile>
       <div className="page stack">
-        <PageHeader title="我的" subtitle="这里管理你的工作档案和本地数据。" />
+        <PageHeader title="我的" subtitle="这里管理你的工作档案和数据。" />
         <div className="card stack">
           <SectionTitle
             title="工作档案"
@@ -128,7 +128,7 @@ export default function ProfilePage() {
           <ul className="stack muted small">
             <li>· AI 整理结果需要你本人确认，不会自动变成事实。</li>
             <li>· 产品只做记录与整理，不提供法律结论。</li>
-            <li>· 本演示的数据仅保存在当前浏览器中，不会上传服务器。</li>
+            <li>· 记录保存在后端数据库，用匿名设备标识区分，不需要账号。</li>
             <li>· 原始文件不会被修改，模拟提取摘要与原件分开保存。</li>
           </ul>
           <Button variant="ghost" onClick={() => setPrivacy(true)}>
@@ -185,11 +185,11 @@ export default function ProfilePage() {
             <Button onClick={exportData}>导出演示数据</Button>
             <Button onClick={() => setResetOpen(true)}>重置演示故事</Button>
             <Button variant="danger" onClick={() => setClearOpen(true)}>
-              清空本地数据
+              清空我的数据
             </Button>
           </div>
           <p className="small muted">
-            清空会删除 localStorage 中的记录与 IndexedDB 中的文件，无法恢复。
+            清空会删除数据库中这台设备的记录和服务器上保存的文件，无法恢复。
           </p>
         </div>
         <p className="small muted">
@@ -300,9 +300,8 @@ export default function ProfilePage() {
         <Modal title="隐私与数据说明" onClose={() => setPrivacy(false)}>
           <div className="stack">
             <p className="muted">
-              这是一个本地演示版本。工作档案、日记、事件、材料元数据和聊天记录保存在
-              localStorage（键名 {STORAGE_KEY}），上传的原始文件保存在
-              IndexedDB。清空浏览器数据或使用无痕窗口都会导致数据不可访问。
+              工作档案、日记、事件、材料元数据和聊天记录保存在后端数据库，上传的原始文件保存在服务器本地磁盘。
+              没有账号体系，浏览器里只保存一个匿名设备标识；清空浏览器数据、换浏览器或使用无痕窗口后，将无法再访问这些记录，请先导出备份。
             </p>
             <p className="muted">
               模拟 AI
@@ -317,16 +316,16 @@ export default function ProfilePage() {
       )}
       <ConfirmDialog
         open={clearOpen}
-        title="确认清空本地数据？"
+        title="确认清空我的数据？"
         danger
         confirmText="我确认清空"
-        description="这会删除当前浏览器中的工作档案、日记、事件、材料元数据和所有上传文件，且无法恢复。建议先导出演示数据作为备份。"
+        description="这会删除这台设备在服务器上的工作档案、日记、事件、材料元数据和所有上传文件，且无法恢复。建议先导出演示数据作为备份。"
         onCancel={() => setClearOpen(false)}
         onConfirm={async () => {
           setBusy(true);
           try {
             await clearData();
-            toast("本地数据已清空");
+            toast("数据已清空");
             navigate("/onboarding", { replace: true });
           } catch (e) {
             toast((e as Error).message);

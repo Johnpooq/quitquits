@@ -12,3 +12,12 @@ playwright-report
 
 # 视觉 / 响应式走查生成的截图，可用 scripts/ 里的脚本重新生成
 outputs/
+
+# 后端：本机密钥、PGlite 数据、上传文件、e2e 临时目录
+server/.env
+server/data/
+server/storage/
+.e2e/
+
+
+docs/source/

@@ -8,7 +8,8 @@ import {
 } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import { ToastProvider } from "./components/ui";
-import { useAppStore } from "./store/useAppStore";
+import { hydrateStore, useAppStore } from "./store/useAppStore";
+import { aiService } from "./services/ai";
 import OnboardingPage from "./pages/Onboarding";
 import TodayPage from "./pages/Today";
 import ReviewPage from "./pages/Review";
@@ -77,10 +78,35 @@ const router = createBrowserRouter([
   },
 ]);
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <ToastProvider>
-      <RouterProvider router={router} />
-    </ToastProvider>
-  </React.StrictMode>,
-);
+const root = createRoot(document.getElementById("root")!);
+
+/** 启动画面：数据来自后端数据库，载入完成前不渲染页面，避免用空数据覆盖 */
+function Boot({ error }: { error?: string }) {
+  return (
+    <main className="page stack" role={error ? "alert" : "status"}>
+      <p className="muted">{error ?? "正在载入你的记录…"}</p>
+      {error && (
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => window.location.reload()}
+        >
+          重试
+        </button>
+      )}
+    </main>
+  );
+}
+
+root.render(<Boot />);
+Promise.all([hydrateStore(), aiService.init()])
+  .then(() =>
+    root.render(
+      <React.StrictMode>
+        <ToastProvider>
+          <RouterProvider router={router} />
+        </ToastProvider>
+      </React.StrictMode>,
+    ),
+  )
+  .catch((e: Error) => root.render(<Boot error={e.message} />));

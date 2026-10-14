@@ -2,21 +2,25 @@
 
 一份安静、克制的职场记录工具：选一个心情，或者随手写一句，把工作里发生的事慢慢记下来；需要的时候再整理成事件、补充材料，并生成一份结构化报告。
 
-> 这是一个**本地前端演示版本**。所有 AI 能力、文件提取与报告判断均为**模拟实现**，不接入真实大模型，不接入云存储、支付或律师服务，也不提供法律结论。
+> 前端 + 最小后端（Hono + Drizzle + Postgres）。数据存在数据库里，用匿名设备标识区分用户，没有账号、支付或律师服务，也不提供法律结论。AI 默认走规则模板（界面标注「模拟 AI」）；在 `server/.env` 配置模型 Key 后接入真实模型（界面标注「AI」）。
 
 ## 启动方式
 
 ```bash
 npm install
-npm run dev        # 本地开发，默认 http://127.0.0.1:5173
-npm run build      # 类型检查 + 生产构建
-npm run preview    # 预览构建产物（http://127.0.0.1:4173）
-npm test           # 单元规则测试（Vitest）
-npm run test:e2e   # 浏览器流程测试（需要先 npm run build，并安装 chromium）
+cp server/.env.example server/.env   # 可选：配置数据库与模型 Key
+npm run dev        # 同时启动后端（:8787）与前端（http://127.0.0.1:5173，/api 代理到后端）
+npm run dev:api    # 只启动后端
+npm run build      # 类型检查（前端 + server）+ 生产构建
+npm run preview    # 预览构建产物（http://127.0.0.1:4173，需要后端在 :8787 运行）
+npm test           # 单元测试（Vitest）：规则、计分分流、few-shot、知识库、后端接口
+npm run test:e2e   # 浏览器流程测试（需要先 npm run build；会自动启动内存数据库的后端）
+npm run knowledge  # 从 docs/source/*.docx 重新生成 knowledge/*.md（需要本机 pandoc）
+npm run db:generate # 修改 server/src/db/schema.ts 后生成迁移
 npm run format     # Prettier 格式化
 ```
 
-技术栈：React 19 + TypeScript + Vite + Tailwind CSS v4 + React Router + Zustand。图标与插画全部是**原创手绘 SVG**（`src/components/doodles.tsx`），不再使用任何现成的线性图标集，也不使用第三方品牌素材。
+技术栈：React 19 + TypeScript + Vite + Tailwind CSS v4 + React Router + Zustand；后端 Node + TypeScript + Hono + Drizzle ORM + Postgres（未配置 `DATABASE_URL` 时用 PGlite）。图标与插画全部是**原创手绘 SVG**（`src/components/doodles.tsx`），不再使用任何现成的线性图标集，也不使用第三方品牌素材。
 
 ## 信息架构
 
@@ -62,7 +66,10 @@ AI 是**记录过程中的整理助手**，不是聊天机器人。核心原则�
 
 | 用户说什么 | AI 怎么做 |
 | --- | --- |
-| 只说累 / 情绪表达 | 回应情绪，**不创建事件** |
+| 只说累 / 情绪表达 | 先回应情绪，再给 2–3 条马上能做的方法（路径 A），**不创建事件** |
+| 出现自伤念头 / 持续两周以上失眠低落 | 温和回应，给出全国心理援助热线 **12356**，不建事件、不谈材料 |
+| 中风险信号（口头劝退、考核不合格未提异议等） | 路径 A+：情绪回应 + 「现在就开始存证据」的提醒 |
+| 高风险信号（被要求写「个人原因」、收到书面解除通知等） | 路径 B：先接情绪，再给事实清单、材料缺口、后续步骤，并**转介**执业律师 / 劳动人事争议仲裁委员会 / 法律援助中心 |
 | 描述具体变化 | **默认用已有信息直接整理**（日期就用这一天，人物从原话里抽），不要求填完整表单 |
 | 时间说不清（「前几天」） | 只补问一句「大概哪一天」，其余不追问 |
 | 值得及时关注的变化 | 在对话里给一张轻量卡片：**记下来 / 先放着 / 不记录**，默认用已有信息，可展开编辑 |
@@ -71,7 +78,7 @@ AI 是**记录过程中的整理助手**，不是聊天机器人。核心原则�
 | 当天签文件等时间敏感事项 | 展示「整理当前情况」卡片，由用户主动进入，不自动跳转 |
 | 补充已确认事件的新情况 | 建议「追加进展」，不新建重复事件、不自动改写已确认内容 |
 
-「先放着」保留草稿，不会反复弹出。确认后只显示「已记入回顾」，不强制进入事件详情，也不要求上传材料。所有 AI 输出都带「模拟 AI」标识，规则模板不会被包装成真实模型分析。
+「先放着」保留草稿，不会反复弹出。确认后只显示「已记入回顾」，不强制进入事件详情，也不要求上传材料。AI 输出都带标识：规则模板显示「模拟 AI」，接入真实模型后显示「AI」，规则模板不会被包装成真实模型分析。分流与转介由代码决定（见「后端接入」），模型只负责措辞。
 
 ## 留痕建议与材料收集
 
@@ -127,16 +134,33 @@ AI 是**记录过程中的整理助手**，不是聊天机器人。核心原则�
 
 | 内容 | 位置 |
 | --- | --- |
-| 工作档案、每日记录、事件、材料元数据、留痕建议、对话、设置 | `localStorage`（键名 `workday-companion-v1`） |
-| 上传的原始文件（PDF / PNG / JPG / TXT） | `IndexedDB`（库名 `workday-companion-files`） |
+| 工作档案、每日记录（含未发送草稿 `draftText`）、对话、事件、材料元数据、留痕建议、紧急事项整理、设置 | 后端数据库：Postgres（`DATABASE_URL`）或 PGlite（默认 `server/data/pglite`） |
+| 上传的原始文件（PDF / PNG / JPG / TXT） | 后端本地磁盘 `server/storage/<设备 id>/<文件 id>`；元数据在 `stored_file` 表 |
+| 匿名设备令牌 | 浏览器 `localStorage`（键名 `workday-companion-device`），服务端只存它的 SHA-256 |
+| 尚未送达服务端的最后一次修改 | 浏览器 `sessionStorage`（键名 `workday-companion-outbox`），服务端确认后立即删除 |
 
-- 文件本体不放进 `localStorage`，只保存 `fileId` 等元数据。
-- 每日记录（`DailyEntry`）通过 `conversationId` / `eventIds` / `suggestionIds` 关联当天的对话、事件与建议，并用 `draftText` 保存未发送的文字。
-- 消息（`ChatMessage`）带 `dailyEntryId` / `conversationId` / `status`，因此**每日记录是对话的来源**；事件与材料仍是独立对象，方便时间线与报告引用。
-- 留痕建议（`MaterialSuggestion`）带 `entryId`，`eventId` 可以为空——这正是「材料可以先于事件存在」的数据基础。
-- 旧版本数据在启动时由 `src/services/migrate.ts` 自动补齐新字段（v1→v2→v3），不需要手动清理。
-- 刷新页面后数据与文件仍可访问；清空浏览器数据或使用无痕窗口会导致数据不可访问。
-- 「我的 → 数据管理」可导出演示数据 JSON、重置演示故事、清空本地数据（同时清理 IndexedDB）。
+表结构（`server/src/db/schema.ts`，迁移在 `server/drizzle/`，启动时自动执行）按 `AppData` 建：
+
+| 表 | 对应 | 说明 |
+| --- | --- | --- |
+| `device` | 匿名设备 | 没有账号体系：首次访问 `POST /api/device` 拿到令牌，之后所有请求带 `Authorization: Bearer <令牌>` |
+| `settings` | `onboarded` / `isDemo` / `notificationEnabled` / `mockConfig` | 另存数据版本与写入序号 `revision` |
+| `profile` | `WorkProfile` | 每个设备一条 |
+| `daily_entry` | `DailyEntry` | 含 `draft_text`、`conversation_id`、`event_ids`、`suggestion_ids` |
+| `chat_message` | `ChatMessage` | 带 `daily_entry_id` / `conversation_id` / `status`，每日记录是对话的来源 |
+| `event` | `WorkEvent` | `updates`（追加进展）存 jsonb |
+| `material` | `Material` | 文件只存 `file_id` 等元数据 |
+| `material_suggestion` | `MaterialSuggestion` | `event_id` **可空**——材料可以先于事件存在；`entry_id` 挂在当天 |
+| `emergency_session` | `EmergencySession` | `AppData` 里有这一项，所以也建了表 |
+| `stored_file` | 上传文件元数据 | 文件名、类型、大小 |
+
+- 每张表都带 `device_id`，主键是 `(device_id, id)`，不同设备互不可见；数组顺序用 `position` 列保存。
+- **刷新后的数据来自数据库**：页面启动时先 `GET /api/data` 载入，载入完成前不渲染页面（避免用空状态覆盖服务端）；后端不可用时显示「无法连接数据服务」与重试按钮。
+- 写入：store 每次变化后约 150ms 合并为一次 `PUT /api/data`（整份 `AppData`，服务端在一个事务里替换该设备的全部行）。每次写入带递增的 `revision`，比已保存的旧就忽略，乱序或页面关闭前补发的请求不会覆盖新数据。修改先写进 sessionStorage 发件箱，刷新或跳转时没送达的那一份会在下次启动时先补发。
+- **旧数据自动导入**：数据库里还没有这个设备的数据、而浏览器里有旧版本的 `workday-companion-v1` 时，启动时会先用 `src/services/migrate.ts` 补齐字段（v1→v2→v3），把旧 IndexedDB（`workday-companion-files`）里的文件按原 id 上传，再写入数据库；成功后删除旧的 localStorage 键与 IndexedDB。只导入一次。
+- 「我的 → 数据管理」：**导出演示数据**导出当前 `AppData` 的 JSON（不含文件内容）；**清空我的数据**删除这台设备在数据库里的记录与服务器上的文件；**重置演示故事**清空后重新载入虚构数据。
+- 没有账号，所以清空浏览器数据、换浏览器或无痕窗口会丢失设备令牌，之后无法再访问原来的记录。需要长期保留请先导出。
+- 同一设备在多个标签页同时编辑时，以最后一次写入为准。
 
 ## 设计风格：手绘日记本
 
@@ -175,14 +199,14 @@ AI 是**记录过程中的整理助手**，不是聊天机器人。核心原则�
 
 | 位置 | 模拟内容 | 界面标注 |
 | --- | --- | --- |
-| `services/ai.ts` | 对话回应、意图判断、事件提取、每日总结、文件摘要提取 | 「模拟 AI」「模拟提取结果」「演示模式」 |
+| `services/ai.ts` + 后端 `/api/ai/*` | 未配置模型 Key 时：对话回应、每日总结、文件摘要提取都用规则模板 | 「模拟 AI」「模拟提取结果」「演示模式」；配置后显示「AI」 |
 | `services/demo.ts` | 演示故事数据（虚构公司与人物，无真实个人信息） | 「体验演示」「重置演示故事」 |
 | `services/report.ts` | 报告结构化输出（仅基于已确认数据） | 报告页顶部说明 |
 | `services/emergency.ts` | 处理优先级（常规 / 优先 / 紧急）与依据 | 「这是演示规则给出的处理优先级，不是法律结论」 |
 | 通知偏好 | 仅保存应用内偏好 | 「未接入系统通知，不会产生真实推送」 |
 | 专业帮助 | 未接入（按钮为禁用态） | 紧急结果页「专业帮助」面板标注「未接入」 |
 
-模拟服务可在「我的 → 演示设置」调整延迟或触发一次失败，用于查看加载态、失败提示与重试。
+模拟服务可在「我的 → 演示设置」调整延迟（只在规则模式下生效）或触发一次失败，用于查看加载态、失败提示与重试。
 
 模拟行为边界：不会读取图片 / PDF 中的人物与事实来编造摘要；对无法读取的内容只提示手动填写；TXT 仅展示原文节选作为「模拟提取结果」。
 
@@ -202,27 +226,87 @@ AI 是**记录过程中的整理助手**，不是聊天机器人。核心原则�
 12. 报告只包含已确认事件；未确认摘要只标注「摘要待确认」，不进入事实；日期范围筛选真实生效。
 13. 不使用「公司违法」「一定能赢」「你必须辞职」等表述；关注程度使用普通 / 值得关注 / 优先处理。
 
-## 后续真实后端接入位置
+## 后端接入
 
-| 能力 | 现在 | 替换位置 |
+```
+server/
+  src/index.ts          入口：读 server/.env → 连数据库并执行迁移 → 启动 Hono
+  src/app.ts            路由（/api/*）
+  src/auth.ts           匿名设备令牌
+  src/db/schema.ts      Drizzle 表结构；client.ts 选择 Postgres 或 PGlite
+  src/data/             AppData ↔ 数据库行的映射与读写
+  src/files.ts          本地磁盘文件存储（put / get / remove / clear）
+  src/ai/               知识库与 few-shot 载入、system prompt、模型调用、安全兜底
+  drizzle/              迁移 SQL
+  tests/                接口与 AI 兜底测试（内存 PGlite）
+knowledge/              由 docs/source/*.docx 转出的知识库 + fewshot/*.json
+```
+
+### 接口
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/health` | `{ ok, db: "postgres" \| "pglite", ai: "llm" \| "rules" }`，前端据此显示「AI / 模拟 AI」 |
+| `POST /api/device` | 申请匿名设备令牌（不需要登录） |
+| `GET / PUT / DELETE /api/data` | 读取 / 整份写入 / 清空本设备的 `AppData`；`AppData` 即传输结构 |
+| `PUT / GET / DELETE /api/files/:id`、`DELETE /api/files` | 文件上传、下载、删除、清空；20 MB 以内的 PDF / PNG / JPG / TXT |
+| `POST /api/ai/reply` / `summarize` / `extract` | 对应前端 `aiService.reply / summarize / extract`，签名不变 |
+
+前端只改了两处数据层：`useAppStore` 的 persist 存储换成 API 客户端（`src/services/api.ts`），`services/files.ts` 换成上传 / 下载接口；另外入口 `main.tsx` 增加了载入完成前的等待界面，「我的」「引导」「报告」里原本写着「数据只保存在当前浏览器」的说明文字改成了实际情况。
+
+### 数据库
+
+- 设置 `DATABASE_URL` → 连接 Postgres。本地可用 `docker compose up -d` 起一个（见 `docker-compose.yml`），然后在 `server/.env` 写 `DATABASE_URL=postgres://quitquit:quitquit@127.0.0.1:5432/quitquit`。
+- 不设置 → 使用 [PGlite](https://pglite.dev)（WASM 版 Postgres，同一份 Drizzle pg schema 与迁移），数据写在 `PGLITE_DIR`（默认 `server/data/pglite`）。这样开发、`npm test` 与 e2e 都不依赖 Docker；没有选 SQLite，是为了和生产 Postgres 用同一套方言与迁移。
+
+### AI：规则决定分流，模型只负责措辞
+
+1. **规则层**（`src/services/ai.ts` + `src/services/triage.ts`，前后端共用）先决定：意图、分流路径（A / A+ / B）、命中的风险信号、危机信号、要不要建事件 / 补问 / 追加进展、要列哪些材料缺口。
+   - `triage.ts` 把 `knowledge/risk-assessment.md` 的问卷与计分写成代码：20 题、满分 40、红线 R1–R6 一票否决、阈值 0–5 → A、6–11 → A+、≥12 或命中红线 → B；以及第五节 18 条风险信号的对话快速扫描。
+   - 与原文的一处差异：原文 Q9 红线选项标的是 2 分，但模块三表头写「0 / 1 / 3 分」，且按原文分值加总只有 39 分、与「满分 40」不符；代码按表头把 Q9 红线选项记为 3 分。命中红线本身就直接判 B，不影响分流结果。
+2. **模型**（配置了 `LLM_API_KEY` 时）：system prompt = 硬约束 + 当前路径相关的知识库（frontmatter 里的 `path`）+ 全部 few-shot；用户消息里带上规则层的判断与模板草稿，模型只把话说好，不能改变判断。接口为 OpenAI 兼容的 `/chat/completions`（DeepSeek、通义千问、Kimi、OpenAI 等），配置见 `server/.env.example`。
+3. **安全兜底**（`server/src/ai/guard.ts`）：出现「公司违法 / 一定能赢 / 必须辞职」等结论性表述、编造知识库外的案号或法条、补问超过一句、过长 → 丢弃模型输出改用规则模板；高风险缺转介、危机缺 12356 → 自动补上。模型超时或报错同样退回规则模板，并在返回里如实标注 `mode`。
+
+硬约束：先接情绪再谈事实；不说「公司违法 / 一定能赢 / 必须辞职」；不下法律结论；路径 B 必须转介执业律师、当地劳动人事争议仲裁委员会或当地法律援助中心；出现自伤念头给出全国心理援助热线 12356。
+
+### 知识库与 few-shot
+
+- `knowledge/risk-assessment.md`、`emotion-support.md`、`evidence-checklist.md` 由 `npm run knowledge`（pandoc）从 `docs/source/*.docx` 生成，frontmatter 含 `title`、`source`（来源 docx）、`path`（服务的分流路径）、`updated`（docx 修改日期）。只做格式清理：去掉表格里的 `| ------ |` 残留行与 pandoc 转义，正文不改写。
+- `knowledge/fewshot/*.json`：每条含 `user_input`、`path`、`ideal_reply`、`suggestions`（应触发的类型：`coping_methods` / `candidate_event` / `clarify` / `materials` / `emergency` / `append_update` / `evidence_reminder` / `referral` / `crisis_hotline`）、`material_types`。覆盖只说累、被劝退写个人原因、自伤念头、时间说不清、已确认事件的新情况、中风险预警、当天被要求签字。`tests/knowledge.test.ts` 逐条校验规则层的输出与示例一致，并检查理想回复遵守硬约束、没有新增案号或法条。
+
+### 环境变量（`server/.env`，只在服务端读取）
+
+| 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| 对话回应 / 事件提取 / 每日总结 / 文件提取 | `src/services/ai.ts` 内本地规则 | 保留 `aiService.reply / summarize / extract` 的签名，替换为实现真实模型调用的实现 |
-| 数据存储 | `src/store/useAppStore.ts` 的 `persist` | 将 store 的数据读写替换为 API 客户端；`AppData` 即传输结构 |
-| 文件存储 | `src/services/files.ts`（IndexedDB） | 替换为对象存储上传 / 下载；保持 `put / get / remove` 语义 |
-| 报告导出 | `src/services/report.ts` + 浏览器打印 | 服务端渲染 PDF；`reportToMarkdown` 可直接复用 |
-| 账户、支付、律师服务 | 未接入 | 需要新增服务层，不要在页面中预留无响应入口 |
+| `HOST` / `PORT` | `127.0.0.1` / `8787` | 后端监听地址 |
+| `DATABASE_URL` | 空 | 设置后使用 Postgres |
+| `PGLITE_DIR` | `server/data/pglite` | 未设置 `DATABASE_URL` 时 PGlite 的数据目录；`memory://` 只在内存 |
+| `STORAGE_DIR` | `server/storage` | 上传文件目录 |
+| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_TIMEOUT_MS` | 空 / OpenAI / 空 / 20000 | 模型配置；不填 Key 则使用规则模板 |
 
-约束：前端不放任何 API Key；真实调用应经由服务端。
+API Key 只在服务端读取，前端代码与构建产物里没有任何 Key（`server/tests/api.test.ts` 会扫描 `src/` 确认）。
+
+### 仍未接入
+
+| 能力 | 说明 |
+| --- | --- |
+| 报告导出 | 仍是 `src/services/report.ts` + 浏览器打印；服务端渲染 PDF 可直接复用 `reportToMarkdown` |
+| 账户、支付、律师服务 | 未接入，页面中不预留无响应入口 |
+| 设备令牌申请限流、多标签页合并编辑 | MVP 未做 |
 
 ## 验证结果
 
-- `npm run build`：类型检查通过，Vite 构建成功（约 474 KB JS / 35 KB CSS，gzip 后 145 KB / 6.6 KB）。
-- `npm test`：33 条规则测试全部通过。
+- `npm run build`：类型检查（前端 + server）通过，Vite 构建成功。
+- `npm test`：123 条测试全部通过（6 个文件）。
   - `tests/materials.test.ts`（12 条）：材料去重、缺失区间、不同事件不误去重、草稿不进报告、日期筛选生效、外存文件与未确认摘要的标注。
-  - `tests/assistant.test.ts`（21 条）：只说累不建事件、描述变化直接用已有信息整理、普通进展不打扰、时间说不清才补问、能推断时间就不追问、时间敏感给整理入口、问该保存什么先查库存、留痕建议不依赖事件、已确认事件只建议追加进展、同日不重复生成草稿、意图分类、人物与日期解析、总结不含结论性判断、只填心情也能生成总结、留痕建议脱离事件、v1→v2→v3 数据迁移。
-- `npm run test:e2e`：23 条浏览器测试全部通过（2 个用例文件）。
-  - `flow.spec.ts`（7 条）：完整流程（心情 → 保存 → 对话 → 轻量卡片 → 记入回顾 → 刷新恢复 → 回顾 → 报告）；普通的一天只选心情就能保存；从历史日期进入当天记录与对话；未确认事件也能先保存材料且不重复提醒；回顾默认视图保持简洁；时间敏感内容给出整理入口并能回到当天记录；首次使用可只填工作状态。
-  - `ux.spec.ts`（16 条）：底部三项导航不遮挡内容、输入框不与导航重叠、无横向滚动、键盘可激活导航、未接入功能有提示；主按钮淡黄底与深墨描边、页面米白底、卡片白底描边且无阴影、心情选择只有手绘 SVG 且没有系统 emoji、关注程度文字化；草稿不进入回顾、未发送文字作为草稿保留；情绪日历七列对齐无横向滚动、每天只有一个主心情角色且只显示真实记录、今天/已记录/未记录/未来可区分、月份切换与「回到今天」可用、日历下方的手绘铅笔入口、真实空状态与演示数据可区分。
+  - `tests/assistant.test.ts`（21 条）：只说累不建事件、描述变化直接整理、时间说不清才补问、时间敏感给整理入口、问该保存什么先查库存、已确认事件只建议追加进展、v1→v2→v3 数据迁移等。
+  - `tests/triage.test.ts`（42 条）：20 题 / 满分 40 / 各模块分值、六条红线逐条一票否决、阈值边界（5/6、11/12）、Q1 紧迫度、18 条风险信号扫描、危机识别、分流结果驱动回复（A 只给 2–3 条方法、A+ 存证提醒、B 先接情绪再列缺口与转介、12356、高风险补问也只问一句、全部回复无结论性表述）。
+  - `tests/knowledge.test.ts`（19 条）：知识库 frontmatter、无 `------` 残留、关键规则原文保留；每条 few-shot 的路径 / suggestion 类型 / 材料类型与规则层一致，理想回复遵守硬约束且不新增案号法条。
+  - `server/tests/api.test.ts`（16 条）：匿名设备与 401、AppData 整份读写原样往返（含草稿、eventId 为空的建议、数组顺序）、旧写入不覆盖新数据、整份替换、设备隔离、非法数据 400、清空、文件上传下载删除清空与类型 / 路径校验、API Key 不进前端。
+  - `server/tests/ai.test.ts`（13 条）：system prompt 拼接知识库与 few-shot、按路径选文档；模型输出被采用、结论性表述 / 编造案号被丢弃、漏转介与漏 12356 自动补上、调用失败退回规则、补问多句被拒；总结与提取的两种模式。
+- `npm run test:e2e`：29 条浏览器测试全部通过（3 个用例文件，e2e 自动启动内存 PGlite 的后端与 preview）。
+  - `flow.spec.ts`（7 条）、`ux.spec.ts`（16 条）：原有产品流程与视觉验收。
+  - `backend.spec.ts`（6 条）：刷新后数据来自数据库（浏览器里只剩设备令牌，清掉会话存储后仍能读回对话与草稿）、演示文件存在服务端可下载、旧 localStorage + IndexedDB 数据首次启动自动导入且不重复、自伤念头给出 12356、被劝退写个人原因给出材料缺口与转介、后端不可用时显示重试。
 
 ### 重点验收对照（产品流程）
 
@@ -251,4 +335,4 @@ AI 是**记录过程中的整理助手**，不是聊天机器人。核心原则�
 | 情绪日历七列完整、状态可区分、只用真实记录 | `ux.spec.ts` 情绪日历 6 条用例 |
 | 支持系统「减少动态效果」 | `index.css` 的 `prefers-reduced-motion` 覆盖；动效只有一次性 `animate-pop` |
 
-已知限制：仅为前端演示；不提供账号体系、云同步、真实 AI 与专业服务；打印样式依赖浏览器「另存为 PDF」，暂不提供 Word 导出。
+已知限制：没有账号体系（匿名设备令牌丢失后无法找回记录）；未接入专业服务；打印样式依赖浏览器「另存为 PDF」，暂不提供 Word 导出。

@@ -231,6 +231,31 @@ export function requirementsForChange(
     );
   if (/HR|人事|谈话|沟通/.test(text) && !list.some((r) => r.type === "hr"))
     list.push({ ...base, type: "hr", title: "本次沟通记录" });
+  if (/劝退|劝离|个人原因|辞职信|主动辞职/.test(text)) {
+    if (!list.some((r) => r.type === "hr"))
+      list.push({
+        ...base,
+        type: "hr",
+        title: "劝退沟通记录",
+        reason: "劝退、让你写个人原因的对话，建议保留录音或事后书面确认。",
+      });
+    list.push(
+      {
+        ...base,
+        type: "notice",
+        title: "被要求填写或签署的文件",
+        reason: "签字之前先拍照留底，看清有没有「个人原因」「已结清」「无争议」字样。",
+        priority: true,
+      },
+      {
+        ...base,
+        type: "contract",
+        title: "当前有效劳动合同",
+        reason: "用于确认劳动关系与岗位信息。",
+        currentOnly: true,
+      },
+    );
+  }
   if (/协议|签文件|签署/.test(text))
     list.push({
       ...base,

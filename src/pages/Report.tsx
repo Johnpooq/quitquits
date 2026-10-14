@@ -333,7 +333,7 @@ export default function ReportPage() {
             <p className="small muted">
               报告生成时间：
               {new Date(report.generatedAt).toLocaleString("zh-CN")} ·
-              本地演示版本，数据仅保存在当前浏览器。
+              演示版本，数据来自后端数据库。
             </p>
           </article>
         )}

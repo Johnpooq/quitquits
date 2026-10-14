@@ -18,10 +18,13 @@ if (await demo.count()) {
   await page.waitForTimeout(900);
 }
 
-// 从本地存储里取出真实 id，才能进详情页
-const ids = await page.evaluate(() => {
-  const raw = localStorage.getItem("workday-companion-v1");
-  const state = raw ? JSON.parse(raw).state || {} : {};
+// 从后端数据库里取出真实 id，才能进详情页
+const ids = await page.evaluate(async () => {
+  const token = localStorage.getItem("workday-companion-device");
+  const res = await fetch("/api/data", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const state = (await res.json()).state || {};
   return {
     event: state.events?.[0]?.id ?? null,
     material: state.materials?.[0]?.id ?? null,

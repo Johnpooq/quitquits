@@ -1,19 +1,11 @@
+import { apiFetch } from "./api";
+
 export interface StoredFile {
   id: string;
   blob: Blob;
   name: string;
   type: string;
 }
-const DB_NAME = "workday-companion-files";
-const openDB = (): Promise<IDBDatabase> =>
-  new Promise((resolve, reject) => {
-    const r = indexedDB.open(DB_NAME, 1);
-    r.onupgradeneeded = () =>
-      r.result.createObjectStore("files", { keyPath: "id" });
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () =>
-      reject(new Error("无法打开本地文件库，请检查浏览器存储权限。"));
-  });
 export function validateFile(file: File) {
   if (file.size > 20 * 1024 * 1024)
     throw new Error("文件超过 20 MB，请选择较小的文件。");
@@ -29,68 +21,77 @@ export function validateFile(file: File) {
   ];
   if (!types.includes(file.type)) throw new Error("文件类型与支持格式不符。");
 }
+
+const upload = async (blob: Blob, name: string, id: string) => {
+  await apiFetch(`/files/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: blob,
+    headers: {
+      "Content-Type": blob.type || "application/octet-stream",
+      "X-File-Name": encodeURIComponent(name),
+    },
+  });
+  return id;
+};
+
+/**
+ * 文件本体存在服务端本地磁盘，元数据在数据库里。
+ * 语义与原来的 IndexedDB 版本一致：put / get / remove / clear。
+ */
 export const fileService = {
   async put(file: File, id = crypto.randomUUID()) {
     validateFile(file);
-    const db = await openDB();
-    try {
-      await new Promise<void>((res, rej) => {
-        const tx = db.transaction("files", "readwrite");
-        tx.objectStore("files").put({
-          id,
-          blob: file,
-          name: file.name,
-          type: file.type,
-        });
-        tx.oncomplete = () => res();
-        tx.onerror = () =>
-          rej(new Error("文件保存失败，可能是浏览器存储空间不足。"));
-        tx.onabort = () => rej(new Error("文件保存已中断。"));
-      });
-      return id;
-    } finally {
-      db.close();
-    }
+    return upload(file, file.name, id);
   },
   async get(id: string): Promise<StoredFile | undefined> {
-    const db = await openDB();
-    try {
-      return await new Promise((res, rej) => {
-        const r = db.transaction("files").objectStore("files").get(id);
-        r.onsuccess = () => res(r.result);
-        r.onerror = () => rej(new Error("文件读取失败，请重试。"));
-      });
-    } finally {
-      db.close();
-    }
+    const res = await apiFetch(`/files/${encodeURIComponent(id)}`, {}, true, {
+      allow: [404],
+    });
+    if (res.status === 404) return undefined;
+    const blob = await res.blob();
+    return {
+      id,
+      blob,
+      name: decodeURIComponent(res.headers.get("X-File-Name") || id),
+      type: blob.type,
+    };
   },
   async remove(id: string) {
-    const db = await openDB();
-    try {
-      await new Promise<void>((res, rej) => {
-        const tx = db.transaction("files", "readwrite");
-        tx.objectStore("files").delete(id);
-        tx.oncomplete = () => res();
-        tx.onerror = () => rej(new Error("文件清理失败。"));
-      });
-    } finally {
-      db.close();
-    }
+    await apiFetch(`/files/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
   async clear() {
-    const db = await openDB();
-    try {
-      await new Promise<void>((res, rej) => {
-        const tx = db.transaction("files", "readwrite");
-        tx.objectStore("files").clear();
-        tx.oncomplete = () => res();
-        tx.onerror = () => rej(new Error("无法清空本地文件，请重试。"));
-      });
-    } finally {
-      db.close();
-    }
+    await apiFetch("/files", { method: "DELETE" });
   },
 };
+
+/* ---------- 旧版本：文件存在浏览器 IndexedDB 里，首次启动时迁移到服务端 ---------- */
+
+const LEGACY_DB = "workday-companion-files";
+
+const openLegacy = (): Promise<IDBDatabase | null> =>
+  new Promise((resolve) => {
+    if (typeof indexedDB === "undefined") return resolve(null);
+    const r = indexedDB.open(LEGACY_DB, 1);
+    r.onupgradeneeded = () =>
+      r.result.createObjectStore("files", { keyPath: "id" });
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => resolve(null);
+  });
+
+/** 把旧 IndexedDB 里的文件按原 id 上传到服务端，成功后删除本地文件库 */
+export async function importLegacyFiles(): Promise<number> {
+  const db = await openLegacy();
+  if (!db) return 0;
+  const records = await new Promise<StoredFile[]>((res, rej) => {
+    const r = db.transaction("files").objectStore("files").getAll();
+    r.onsuccess = () => res(r.result as StoredFile[]);
+    r.onerror = () => rej(new Error("旧文件读取失败，请重试。"));
+  }).finally(() => db.close());
+  for (const file of records) await upload(file.blob, file.name, file.id);
+  indexedDB.deleteDatabase(LEGACY_DB);
+  return records.length;
+}
+
 export const downloadBlob = (blob: Blob, name: string) => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

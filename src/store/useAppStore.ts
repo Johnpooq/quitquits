@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import {
+  persist,
+  type PersistStorage,
+  type StorageValue,
+} from "zustand/middleware";
 import type {
   AppData,
   WorkProfile,
@@ -16,7 +20,8 @@ import type {
 import { uid, now } from "../constants";
 import { emptyData, createDemo } from "../services/demo";
 import { migrateData } from "../services/migrate";
-import { fileService } from "../services/files";
+import { fileService, importLegacyFiles } from "../services/files";
+import { ApiError, apiFetch, apiJSON } from "../services/api";
 import {
   createSuggestions,
   reconcileSuggestions,
@@ -24,6 +29,7 @@ import {
   type MaterialRequirement,
 } from "../services/materials";
 
+/** 旧版本 localStorage 的键名：现在只用于首次启动时导入旧数据 */
 export const STORAGE_KEY = "workday-companion-v1";
 /**
  * 数据模型版本：
@@ -76,19 +82,187 @@ export interface AppStore extends AppData {
   clearData: () => Promise<void>;
 }
 
-const localJSONStorage = createJSONStorage<AppData>(() => ({
-  getItem: (key) => localStorage.getItem(key),
-  removeItem: (key) => localStorage.removeItem(key),
-  setItem: (key, value) => {
+/* ---------------- 数据读写：后端数据库（经由 /api/data） ---------------- */
+
+const DATA_KEYS: (keyof AppData)[] = [
+  "profile",
+  "onboarded",
+  "isDemo",
+  "entries",
+  "events",
+  "materials",
+  "suggestions",
+  "emergencies",
+  "messages",
+  "notificationEnabled",
+  "mockConfig",
+];
+const pickData = (state: Partial<AppData>) =>
+  Object.fromEntries(
+    DATA_KEYS.filter((k) => k in state).map((k) => [k, state[k]]),
+  ) as unknown as AppData;
+
+/**
+ * 写入的「发件箱」：每次修改先同步写进 sessionStorage，服务端确认后再删掉。
+ * 刷新或跳转时，未送达的最后一次修改会在下次启动时先补发，再从数据库读取。
+ * 这里只暂存尚未确认的那一份，数据的正式来源始终是数据库。
+ */
+const OUTBOX_KEY = "workday-companion-outbox";
+const WRITE_DELAY_MS = 150;
+let ready = false;
+let hydrationError: Error | null = null;
+let revision = 0;
+let latest: string | null = null;
+let sending = false;
+let timer: ReturnType<typeof setTimeout> | undefined;
+
+const nextRevision = () => (revision = Math.max(Date.now(), revision + 1));
+
+const putData = (body: string) =>
+  apiFetch("/data", {
+    method: "PUT",
+    body,
+    headers: { "Content-Type": "application/json" },
+    // 页面关闭时请求也能送达；超过浏览器 keepalive 上限时退回普通请求
+    keepalive: body.length < 60_000,
+  });
+
+const outbox = {
+  get: () => sessionStorage.getItem(OUTBOX_KEY),
+  set: (body: string) => {
     try {
-      localStorage.setItem(key, value);
+      sessionStorage.setItem(OUTBOX_KEY, body);
     } catch {
-      throw new Error(
-        "浏览器存储写入失败，请释放空间后重试；当前修改可能未能保存。",
-      );
+      /* 会话存储写满时只依赖网络请求 */
     }
   },
-}));
+  clearIf: (body: string) => {
+    if (sessionStorage.getItem(OUTBOX_KEY) === body)
+      sessionStorage.removeItem(OUTBOX_KEY);
+  },
+};
+
+let lastError: unknown = null;
+
+async function drain() {
+  if (sending || !latest) return;
+  sending = true;
+  const body = latest;
+  latest = null;
+  let failed = false;
+  try {
+    await putData(body);
+    outbox.clearIf(body);
+    lastError = null;
+  } catch (e) {
+    // 客户端错误（数据不合法等）重试也没用；网络或服务端错误稍后重试
+    const status = e instanceof ApiError ? e.status : 0;
+    if (status >= 400 && status < 500) outbox.clearIf(body);
+    else latest ??= body;
+    lastError = e;
+    failed = true;
+    console.error("数据保存失败", e);
+  } finally {
+    sending = false;
+    if (latest) {
+      clearTimeout(timer);
+      timer = setTimeout(drain, failed ? 3000 : WRITE_DELAY_MS);
+    }
+  }
+}
+
+/** 等待所有修改写入数据库（清空、重置等操作完成前调用）；写入失败时抛错 */
+export async function flushData() {
+  while (latest || sending) {
+    if (sending) {
+      await new Promise((r) => setTimeout(r, 20));
+      continue;
+    }
+    clearTimeout(timer);
+    const body = latest;
+    await drain();
+    if (lastError && latest === body) throw lastError;
+  }
+}
+
+/** 旧版本把数据存在 localStorage：数据库里还没有数据时自动导入一次 */
+async function importLegacy(): Promise<StorageValue<AppData> | null> {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return null;
+  let parsed: { state?: unknown };
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const state = pickData(migrateData(parsed.state));
+  await importLegacyFiles();
+  await putData(
+    JSON.stringify({
+      revision: nextRevision(),
+      version: STORAGE_VERSION,
+      state,
+    }),
+  );
+  localStorage.removeItem(STORAGE_KEY);
+  return { state, version: STORAGE_VERSION };
+}
+
+const apiStorage: PersistStorage<AppData> = {
+  getItem: async () => {
+    try {
+      const pending = outbox.get();
+      if (pending) {
+        await putData(pending).catch((e) => {
+          if (!(e instanceof ApiError) || e.status === 0 || e.status >= 500)
+            throw e;
+        });
+        outbox.clearIf(pending);
+      }
+      const remote = await apiJSON<{
+        state: AppData | null;
+        version: number;
+        revision: number;
+      }>("/data");
+      revision = Math.max(revision, remote.revision);
+      const value = remote.state
+        ? { state: remote.state, version: remote.version }
+        : await importLegacy();
+      ready = true;
+      hydrationError = null;
+      return value;
+    } catch (e) {
+      hydrationError = e as Error;
+      throw e;
+    }
+  },
+  setItem: (_name, value) => {
+    // 还没从数据库读到数据之前，不能用空状态覆盖服务端
+    if (!ready) return;
+    const body = JSON.stringify({
+      revision: nextRevision(),
+      version: value.version ?? STORAGE_VERSION,
+      state: pickData(value.state),
+    });
+    latest = body;
+    outbox.set(body);
+    clearTimeout(timer);
+    timer = setTimeout(drain, WRITE_DELAY_MS);
+  },
+  removeItem: () => {},
+};
+
+if (typeof window !== "undefined")
+  window.addEventListener("pagehide", () => {
+    if (latest) void putData(latest).catch(() => {});
+  });
+
+/** 启动时从数据库载入数据；失败时抛错，由入口展示重试界面 */
+export async function hydrateStore() {
+  await useAppStore.persist.rehydrate();
+  if (!ready)
+    throw hydrationError ?? new Error("数据载入失败，请刷新页面重试。");
+}
 
 export const useAppStore = create<AppStore>()(
   persist(
@@ -484,19 +658,23 @@ export const useAppStore = create<AppStore>()(
         if (replace) await fileService.clear();
         const data = await createDemo();
         set(data);
+        await flushData();
       },
 
       clearData: async () => {
         await fileService.clear();
         set(emptyData());
+        await flushData();
         localStorage.removeItem(STORAGE_KEY);
       },
     }),
     {
       name: STORAGE_KEY,
       version: STORAGE_VERSION,
-      storage: localJSONStorage,
+      storage: apiStorage,
+      partialize: (state) => pickData(state),
       migrate: (persisted) => migrateData(persisted),
+      skipHydration: true,
     },
   ),
 );

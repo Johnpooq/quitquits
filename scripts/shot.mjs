@@ -25,7 +25,7 @@ const browser = await chromium.launch();
 const context = await browser.newContext({ deviceScaleFactor: 2 });
 const page = await context.newPage();
 
-// 先一次性载入演示数据，之后各页面共用同一份 localStorage
+// 先一次性载入演示数据，之后各页面共用同一个匿名设备的数据库记录
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 const demo = page.getByRole("button", { name: "体验演示" });
 if (await demo.count()) {
